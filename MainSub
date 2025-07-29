@@ -1,0 +1,181 @@
+Sub Migration()
+
+Dim CDM23() As Variant, tempRow() As Variant, tempWDR() As Variant, tempDEP() As Variant, MigrationArr() As Variant
+Dim rowlist As Object, WDRlist As Object, DEPlist As Object
+Dim i As Integer, ii As Integer, iii As Integer
+Dim Amt1 As Double, Amt2 As Double
+
+Set rowlist = CreateObject("System.Collections.ArrayList")
+Set WDRlist = CreateObject("System.Collections.ArrayList")
+Set DEPlist = CreateObject("System.Collections.ArrayList")
+
+'-------------------------------------------Collect CDM23 Table-----------------------------------------
+
+CDM23 = Worksheets("CDM023").Range("A2") _
+                .Resize(Worksheets("CDM023").UsedRange.Rows.Count - 1, _
+                Worksheets("CDM023").UsedRange.Columns.Count).Value
+
+'------------------------------------------------Start Cal--------------------------------------------------------
+
+With Worksheets("Migration")
+
+For i = 1 To UBound(CDM23, 1)
+    ReDim tempRow(1 To 4)
+
+'CDM23(i, 6) = TransactionType
+'CDM23(i, 14) = Term
+'CDM23(i, 9) = Amount
+'CDM23(i, 34) = CustomerType
+
+'DEP
+    If CDM23(i, 6) = "Deposit" Then
+        tempRow(1) = "New Deposit"
+        tempRow(2) = CDM23(i, 14)
+        tempRow(3) = CDM23(i, 9)
+        tempRow(4) = CDM23(i, 34)
+        rowlist.Add tempRow
+        GoTo NextRow
+    End If
+    
+'WDR
+    If CDM23(i, 6) = "Withdraw" Then
+        tempRow(1) = CDM23(i, 14)
+        tempRow(2) = "Withdraw"
+        tempRow(3) = CDM23(i, 9)
+        tempRow(4) = CDM23(i, 34)
+        rowlist.Add tempRow
+        GoTo NextRow
+    End If
+
+'RollOver
+    If CDM23(i, 6) = "Withdraw-R" Then
+        ReDim tempWDR(1 To 2)
+        ReDim tempDEP(1 To 2)
+    
+        Do While CDM23(i, 6) = "Withdraw-R"
+            tempWDR(1) = CDM23(i, 14)
+            tempWDR(2) = CDM23(i, 9)
+            WDRlist.Add tempWDR
+            i = i + 1
+        Loop
+        Do While CDM23(i, 6) = "Deposit-R" Or i = UBound(CDM23, 1)
+            tempDEP(1) = CDM23(i, 14)
+            tempDEP(2) = CDM23(i, 9)
+            DEPlist.Add tempDEP
+            If CDM23(i + 1, 6) <> "Deposit-R" Then
+                GoTo MatchWDRnDEP
+            End If
+            i = i + 1
+        Loop
+     
+MatchWDRnDEP:
+        Amt2 = 0
+        iii = 0
+        For ii = 0 To WDRlist.Count - 1
+        
+            Amt1 = WDRlist(ii)(2)
+            If Amt2 > 0 Then
+                If Amt1 > Amt2 Then
+                    tempRow(1) = WDRlist(ii)(1)
+                    tempRow(2) = DEPlist(iii)(1)
+                    tempRow(3) = Amt2
+                    tempRow(4) = CDM23(i, 34)
+                    rowlist.Add tempRow
+                    Amt1 = Amt1 - Amt2 'Amortized
+                    iii = iii + 1
+                Else
+                    tempRow(1) = WDRlist(ii)(1)
+                    tempRow(2) = DEPlist(iii)(1)
+                    tempRow(3) = Amt1
+                    tempRow(4) = CDM23(i, 34)
+                    rowlist.Add tempRow
+                    Amt2 = Amt2 - Amt1
+                    If ii = WDRlist.Count - 1 Then
+                        tempRow(1) = "New Deposit"
+                        tempRow(2) = DEPlist(iii)(1)
+                        tempRow(3) = Amt2
+                        tempRow(4) = CDM23(i, 34)
+                        rowlist.Add tempRow
+                    Else
+                        GoTo Nextii
+                    End If
+                End If
+            End If
+            
+            Do While iii <= DEPlist.Count - 1 Or Amt1 <= 0
+                
+                If Amt1 > DEPlist(iii)(2) Then
+                    tempRow(1) = WDRlist(ii)(1)
+                    tempRow(2) = DEPlist(iii)(1)
+                    tempRow(3) = DEPlist(iii)(2)
+                    tempRow(4) = CDM23(i, 34)
+                    rowlist.Add tempRow
+                    Amt1 = Amt1 - DEPlist(iii)(2) 'Amortized
+                    If iii = DEPlist.Count - 1 And Amt1 > 0 Then
+                        tempRow(1) = WDRlist(ii)(1)
+                        tempRow(2) = "Withdraw"
+                        tempRow(3) = Amt1
+                        tempRow(4) = CDM23(i, 34)
+                        rowlist.Add tempRow
+                        Exit Do
+                    End If
+                Else
+                    tempRow(1) = WDRlist(ii)(1)
+                    tempRow(2) = DEPlist(iii)(1)
+                    tempRow(3) = Amt1
+                    tempRow(4) = CDM23(i, 34)
+                    rowlist.Add tempRow
+                    Amt2 = DEPlist(iii)(2) - Amt1
+                    If ii = WDRlist.Count - 1 And Amt2 > 0 Then
+                        tempRow(1) = "New Deposit"
+                        tempRow(2) = DEPlist(iii)(1)
+                        tempRow(3) = Amt2
+                        tempRow(4) = CDM23(i, 34)
+                        rowlist.Add tempRow
+                    End If
+                    Exit Do
+                End If
+                iii = iii + 1
+            Loop
+Nextii:
+        Next ii
+    End If
+
+
+NextRow:
+
+    DEPlist.Clear
+    WDRlist.Clear
+
+Next i
+
+'---------------------------------------------------Clear Migration sheet-------------------------------------------------
+
+.Range("a2").Resize(.UsedRange.Rows.Count - 1, 4).Clear
+
+'---------------------------------------------------rowList to MigrationArr------------------------------------------------
+If rowlist.Count > 0 Then
+    ReDim MigrationArr(1 To rowlist.Count, 1 To 4)
+    For ii = 0 To rowlist.Count - 1
+        For iii = 1 To 4
+            MigrationArr(ii + 1, iii) = rowlist(ii)(iii)
+        Next iii
+    Next ii
+
+'---------------------------------------------------Print MigrationArr---------------------------------------------------
+
+    With Worksheets("Migration").Range("a2").Resize(UBound(MigrationArr, 1), UBound(MigrationArr, 2))
+        .Value = MigrationArr
+        .Columns(1).NumberFormat = "@"
+        .Columns(2).NumberFormat = "@"
+        .Columns(3).NumberFormat = "#,##0.00"
+        .Columns(4).NumberFormat = "@"
+    End With
+    
+End If
+
+End With
+
+
+End Sub
+
